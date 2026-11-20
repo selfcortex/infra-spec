@@ -48,6 +48,8 @@
 | 2 | Description GitHub-репо `selfcortex/RAG` — вставить текст | UI GitHub | Текст в `map.md` §11 / был в postmortem §9; без PAT только через UI |
 | 3 | Проверить алиас `llama` после следующего `docker compose up` ai-compose | ai-compose | Сейчас активен только runtime-командой |
 | 4 | Push этого репо (`infra-spec`) на GitHub | здесь | Репозиторий создан; remote + push |
+| 5a | Dify: поднять стек 1.20.0, GUI `127.0.0.1:8888`, embedder в сети Dify (алиас `embedder`, 1024-dim ✓) | `/mnt/GameLinux/dify` | **done 2026-11-20**: все контейнеры up/healthy, API `{"status":"ok","version":"1.20.0"}`; ADR-013 |
+| 5b | Dify: создать аккаунт в GUI, подключить провайдеры (embed `http://embedder:8081/v1` bge-m3; LLM `http://192.168.1.215:8080/v1` qwen-27b), первый dataset | GUI Dify | данные в `map.md` §12; после — проверка сегментации документа |
 
 ---
 
@@ -80,3 +82,4 @@
 | 5 | XLM-RoBERTa / mRoPE-путь в llama.cpp | bge-m3 заработал с первого раза, запасной план не понадобился (ADR-001) | 2026-11 |
 | 6 | FastMCP (mcp v1) | v2 принят как есть (ADR-005); откат на `mcp<2` не рассматривался | 2026-11 |
 | 7 | `0.0.0.0`-биндинг RAG | безопасность: Phase 1 только localhost (принцип 1.7) | 2026-11 |
+| 8 | RAGFlow-сценарий A (замена RAG-стека) | ES+MySQL+MinIO+NATS+ClickHouse, ~8–12 GiB RAM, два векторных хранилища в одном стеке = нарушение «без дублей»; заменён Dify-GUI рядом (ADR-013) | 2026-11-20 |
