@@ -344,7 +344,8 @@ RAG-стек не тронут.
 | `dify-weaviate-1` | вектор-стор (свой, изолирован от Qdrant) |
 | `dify-redis-1` (healthy), `dify-ssrf_proxy-1`, `dify-nginx-1` | кэш, прокси, GUI |
 
-Порты наружу: **только** `127.0.0.1:8888` (nginx → GUI). 443 и 5003 сняты.
+Порты наружу: **только** `192.168.1.215:8888` (LAN, nginx → GUI; не 0.0.0.0,
+не localhost — переведено с localhost 2026-11-20). 443 и 5003 сняты.
 Сеть `dify_default`: к ней подключён `rag-embedder` с алиасом **`embedder`**
 (`docker network connect --alias embedder dify_default rag-embedder`) —
 проверено: POST `embedder:8081/v1/embeddings` → 1024-dim (2026-11-20).
