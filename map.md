@@ -324,3 +324,34 @@ Phase 2 (не построено):
 | Как prometheus видит rag-core? | ai-net, `targets/rag.yml` → `rag-core:8090` |
 | Что снаружи точно недоступно? | embedder, qdrant (internal-сеть), prometheus, node-exporter, llama-ключ |
 | Разбор RAG-сборки | `REVIEW.md` (рядом, тоже gitignored) |
+
+---
+
+## 12. Стек Dify (добавлен 2026-11-20, ADR-013)
+
+GUI-стек для индексации документов (в т.ч. PDF): `/mnt/GameLinux/dify`,
+compose Dify 1.20.0 (релиз 2026-11-18). **Отдельный самодостаточный стек**;
+RAG-стек не тронут.
+
+| Контейнер | Роль |
+|---|---|
+| `dify-api-1` (healthy) | backend, :5001 внутри |
+| `dify-web-1` | console UI |
+| `dify-worker-1`, `dify-worker_beat-1` | асинхронная обработка документов |
+| `dify-plugin_daemon-1` | плагины (5003 наружу **не** опубликован) |
+| `dify-sandbox-1`, `dify-local_sandbox-1`, `dify-agent_backend-1`, `dify-agent_ssrf_proxy-1` | sandbox/агенты |
+| `dify-db_postgres-1` (healthy) | метаданные (вместо MySQL из RAGFlow) |
+| `dify-weaviate-1` | вектор-стор (свой, изолирован от Qdrant) |
+| `dify-redis-1` (healthy), `dify-ssrf_proxy-1`, `dify-nginx-1` | кэш, прокси, GUI |
+
+Порты наружу: **только** `127.0.0.1:8888` (nginx → GUI). 443 и 5003 сняты.
+Сеть `dify_default`: к ней подключён `rag-embedder` с алиасом **`embedder`**
+(`docker network connect --alias embedder dify_default rag-embedder`) —
+проверено: POST `embedder:8081/v1/embeddings` → 1024-dim (2026-11-20).
+
+Провайдеры (ввести в Dify Console → Model Providers → OpenAI-API-compat):
+- **Embedding**: `http://embedder:8081/v1`, модель `bge-m3`, dim 1024, ключ — любая непустая строка.
+- **LLM**: `http://192.168.1.215:8080/v1`, модель `qwen-27b`, ключ — `~/ai-compose/secrets/llama_api_key`.
+
+Два векторных хранилища осознанно (ADR-013): Qdrant (агент/MCP) и Weaviate
+(человек/GUI) — изолированы стеками.
