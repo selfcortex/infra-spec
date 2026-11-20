@@ -33,6 +33,24 @@
 - [x] `selfcortex/rocm-qwen27b-mtp-docker` — запушены коммиты RAG-интеграции
 - [x] Модель bge-m3: скачана, sha256 сверен с HF LFS oid (`aa473d51…`)
 
+### Гибридный MCP-поиск: qdrant + датасеты Dify + rerank (2026-11-20, `selfcortex/RAG` `7f9a32e`)
+- [x] rag-core на сети `dify_default` (статически в compose); weaviate по сервис-имени `weaviate`
+- [x] Weaviate-форк Dify: работает только `POST /v1/search/{class}/near-vector`
+  (GraphQL-тела и `?vector=` в REST игнорируются); ответ best-first, без distance
+- [x] `search(query, k, source, path)`: кандидаты Qdrant 20 + по 10 с класса `Vector_index_*`,
+  реранкер bge-reranker-v2-m3 (≤60), fallback без реранкера при его падении
+- [x] Проверка: «год великого перелома» — test_file-чанк 2.7 топ-1 (rerank 0.665 vs 0.46,
+  эмбеддер дал разрыв 0.03); «Курукшетра 1026» — топ-1 0.8765; infra-запросы — qdrant как раньше
+- [x] `list_collections` теперь отдаёт и классы датасетов Dify
+- [x] Сеть Dify пересоздаётся после `down` — переподключать embedder + reranker + rag-core (runbook §3)
+
+### Dify-GUI + rerank в GUI (2026-11-20, 5a/5b/5c закрыты)
+- [x] 5a: стек Dify 1.20.0 up/healthy, GUI LAN-only `192.168.1.215:8888`, embedder с алиасом `embedder` (1024-dim)
+- [x] 5b: аккаунт в GUI, провайдеры Embedding (`http://embedder:8081/v1`, bge-m3) и LLM (`http://192.168.1.215:8080/v1`, qwen-27b);
+      первый (тестовый) датасет test_file — 309 сегментов, `@@@CHUNK@@@`, semantic search (hybrid отключён)
+- [x] 5c: сервис `rag-reranker` (commit `98ee4d9`) + провайдер Rerank в GUI (OpenAI-API-compatible,
+      `http://reranker:8091`, ключ `RAG/secrets/rerank_api_key`), rerank включён в Retrieval Settings датасета — проверено в GUI
+
 ### Документация (2026-11-20)
 - [x] `postmortem-rag-build.md` (566 строк: 14 багов, уроки, верификация)
 - [x] `map.md` — карта трёх стеков (сети, порты, потоки A–D, секреты)
@@ -44,12 +62,9 @@
 
 | # | Задача | Где | Примечание |
 |---|---|---|---|
-| 1 | Живой тест RAG из opencode (реальный вопрос с включённым MCP, не curl) | RAG | MCP-эндпоинт проверен handshake'ом; из агента — ещё нет |
 | 2 | Description GitHub-репо `selfcortex/RAG` — вставить текст | UI GitHub | Текст в `map.md` §11 / был в postmortem §9; без PAT только через UI |
 | 3 | Проверить алиас `llama` после следующего `docker compose up` ai-compose | ai-compose | Сейчас активен только runtime-командой |
 | 4 | Push этого репо (`infra-spec`) на GitHub | здесь | Репозиторий создан; remote + push |
-| 5a | Dify: поднять стек 1.20.0, GUI `127.0.0.1:8888`, embedder в сети Dify (алиас `embedder`, 1024-dim ✓) | `/mnt/GameLinux/dify` | **done 2026-11-20**: все контейнеры up/healthy, API `{"status":"ok","version":"1.20.0"}`; ADR-013 |
-| 5b | Dify: создать аккаунт в GUI, подключить провайдеры (embed `http://embedder:8081/v1` bge-m3; LLM `http://192.168.1.215:8080/v1` qwen-27b), первый dataset | GUI Dify | данные в `map.md` §12; после — проверка сегментации документа |
 
 ---
 

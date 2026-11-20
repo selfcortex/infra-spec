@@ -77,12 +77,35 @@ curl -X POST http://localhost:11235/crawl \
   -d '{"urls":["https://..."]}'                                 # Crawl4AI → markdown
 ```
 
+### Dify (GUI-стек, ADR-013)
+```bash
+cd /mnt/GameLinux/dify
+docker compose up -d --wait     # 15 контейнеров; GUI LAN-only: http://192.168.1.215:8888
+```
+После **любого** `docker compose down` Dify сеть `dify_default` пересоздаётся,
+и RAG-контейнеры должны быть подключены заново (алиасы — часть контракта):
+```bash
+docker network connect --alias embedder dify_default rag-embedder   # embeddings bge-m3
+docker network connect --alias reranker dify_default rag-reranker   # POST /rerank (Dify provider)
+docker network connect dify_default rag-core                        # MCP-поиск по датасетам Dify (weaviate)
+# проверка изнутри:
+docker exec dify-api-1 python3 -c "import urllib.request;print(urllib.request.urlopen('http://reranker:8091/health',timeout=10).read().decode())"
+```
+(алиас embedder/reranker — часть контракта провайдеров Dify; rag-core ходит
+к `weaviate` по имени сервиса Dify, без алиаса)
+Rerank-провайдер в GUI Dify: OpenAI-API-compatible, тип модели Rerank,
+endpoint `http://reranker:8091`, API key = `RAG/secrets/rerank_api_key`
+(формат: `query`/`documents`/`top_n` → `results[].relevance_score`,
+Dify сам нормализует scores в 0..1).
+
+
 ## 4. Ротация ключей
 
 | Ключ | Где | Как |
 |---|---|---|
 | `rag_api_key` | `secrets/rag_api_key` | перезаписать файл; rag-core читает при старте → `docker compose restart rag-core`; opencode подхватит при следующем старте (ключ из `{file:...}`) |
 | `qdrant_api_key` | `secrets/qdrant_api_key` | перезаписать + `docker compose restart rag-core rag-qdrant` (qdrant читает из env при старте) |
+| `rerank_api_key` | `RAG/secrets/rerank_api_key` | перезаписать + `docker compose restart reranker`; **и** обновить API key в Dify GUI (провайдер Rerank) |
 | `llama_api_key` | `~/ai-compose/secrets/llama_api_key` | перезаписать; prometheus перечитывает на каждый скрейп (credentials_file) — без рестарта; клиенты (Chatbox) — обновить сами |
 
 ## 5. Что делать если X
@@ -95,6 +118,9 @@ curl -X POST http://localhost:11235/crawl \
 | MCP: `Task group is not initialized` | lifespan хоста не вошёл в `session_manager.run()` | проверить main.py (ADR-005); это баг, не эксплуатация |
 | Инджест: embedder 500 «input too large» | чанк > physical batch | поднять `-b` (сейчас 2048) или `CHUNK_CHARS`; не `-ub` |
 | Инджест: точки не появились | `docker compose logs rag-core` | чаще всего: qdrant 401 (ключ), embedder down (healthcheck) |
+| Dify: embedding/rerank «connection refused» | `docker network inspect dify_default` — rag-embedder/rag-reranker там? | переподключить (раздел 3, Dify) — `down` Dify пересоздаёт сеть |
+| Dify: rerank 401 | `docker exec dify-api-1` curl `http://reranker:8091/health` с Bearer из `RAG/secrets/rerank_api_key` | ключ в GUI ≠ файлу → обновить в провайдере |
+| Reranker: порт 8091 не слушается на хосте | `docker port rag-reranker` пуст, но контейнер healthy | контейнер только на internal-сети не публикует порты; `ai-net` уже в compose — проверить `docker compose config` |
 | Точек меньше ожидаемого | count check (§3) | коллизия путей (ADR-007)? Дедуп идентичных тел (норма)? |
 | Volume `in use` при удалении | `docker volume ls` + `docker ps` | не бороться: state-схема расширяется монотонно (postmortem баг №14); просто реинджест |
 | Qdrant healthcheck падает | `docker exec rag-qdrant ls /bin` | healthcheck на `perl -MIO::Socket::INET` (в образе нет curl/wget; без `$` в compose-строке) |

@@ -116,7 +116,12 @@ MCP-эндпоинт — с аутентификацией.
 - эмбеддинги — внешний OpenAI-совместимый провайдер = наш `rag-embedder`
   (`docker network connect --alias embedder` в сеть Dify), bge-m3 1024-dim;
 - LLM — `llama-qwen27b` через уже опубликованный LAN-порт `192.168.1.215:8080`;
-- наружу: только GUI `127.0.0.1:8888` (nginx 80); 443 и plugin-debug 5003 не публикуются.
+- наружу: GUI на LAN `192.168.1.215:8888` (nginx 80, LAN-only, **не** 0.0.0.0);
+  443 и plugin-debug 5003 не публикуются;
+- rerank — внешний провайдер = `rag-reranker` (bge-reranker-v2-m3, CPU, в RAG-репо,
+  `docker network connect --alias reranker`), формат OpenAI-API-compatible `/rerank`;
+  поиск датасета — **semantic search** (hybrid отключён: BM25 с EN-стоп-словами
+  на смешанном RU/EN корпусе шумит).
 RAG-стек (qdrant + rag-core + MCP агента) **не трогается** — два контура:
 агент → MCP → qdrant; человек → GUI Dify → weaviate.
 **Последствия**: +16 контейнеров, ~4–6 GiB RAM; embedder получает второй

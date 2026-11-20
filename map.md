@@ -162,22 +162,28 @@ opencode (агент)
    ▼
 rag-core (FastAPI)
    │  1) handshake: initialize → заголовок Mcp-Session-Id → notifications/initialized
-   │  2) tools/call  search(query, collection="docs", k, path?)
+   │  2) tools/call  search(query, k, source=all|qdrant|dify, path?)
    │
    │  а) embed: POST http://embedder:8081 (rag-net, без ключа)
    │       llama.cpp --embeddings, bge-m3, CPU → вектор 1024-dim (~10-30 мс на чанк)
-   │  б) search: POST http://qdrant:6333/collections/docs/points/search
-   │       Bearer <secrets/qdrant_api_key> → топ-k точек (score, path, section, text, lines)
+   │  б) кандидаты: Qdrant /collections/docs (20 шт.) + каждый датасет Dify:
+   │       weaviate (dify_default): POST /v1/search/{Vector_index_*_Node}/near-vector
+   │       Bearer <secrets/weaviate_api_key>, по 10 на класс (без score, best-first)
+   │  в) rerank: POST http://reranker:8091/rerank (rag-net, Bearer <secrets/rerank_api_key>)
+   │       bge-reranker-v2-m3, CPU → топ-k с relevance_score
    ▼
-ответ агенту: [ {score, path, section, text, start_line, end_line}, … ]
+ответ агенту: [ {score, source, text, path/section/lines (qdrant)
+                 | dataset_id/document_id/chunk_index (dify)}, … ]
 ```
 
-Тайминги (живые замеры): embed ~10-20 мс, поиск ~5 мс, **итог ~25 мс/запрос**
-(`search_seconds_total = 0.56с` на 22 запроса).
+Тайминги: embed ~10-20 мс; **итог ~1-3 с/запрос** (реранкер на CPU, батч ≤60 чанков;
+без реранкера — ~25 мс). Fallback при падении реранкера: топ-k из каждого стора
+без реранжирования (qdrant по score, dify best-first).
 
-Инструменты MCP: `search`, `list_collections`, `get_document`
-(`get_document(path)` — полный текст файла; кириллические имена работают).
-REST-дубли для человека: `POST /search`, `POST /ingest` (Makefile `make search`).
+Инструменты MCP: `search(query, k, source, path)` (гибрид qdrant+dify, с rerank),
+`list_collections` (qdrant-коллекции + классы датасетов Dify),
+`get_document(path)` (полный текст файла; кириллические имена работают).
+REST-дубли для человека: `POST /search` (тот же гибрид), `POST /ingest` (Makefile `make search`).
 
 **Индексация** (отдельный поток, по требованию, не в MCP-пути):
 ```
@@ -346,13 +352,31 @@ RAG-стек не тронут.
 
 Порты наружу: **только** `192.168.1.215:8888` (LAN, nginx → GUI; не 0.0.0.0,
 не localhost — переведено с localhost 2026-11-20). 443 и 5003 сняты.
-Сеть `dify_default`: к ней подключён `rag-embedder` с алиасом **`embedder`**
-(`docker network connect --alias embedder dify_default rag-embedder`) —
-проверено: POST `embedder:8081/v1/embeddings` → 1024-dim (2026-11-20).
+Сеть `dify_default`: к ней подключены контейнеры RAG-стека —
+`rag-embedder` с алиасом **`embedder`**, `rag-reranker` с алиасом **`reranker`**
+(`docker network connect --alias <alias> dify_default <container>`) и `rag-core`
+(без алиаса, статически в compose RAG; ходит к сервису `weaviate`) —
+проверено: POST `embedder:8081/v1/embeddings` → 1024-dim; GET `reranker:8091/health`;
+`rag-core` → `weaviate:8080` (2026-11-20).
+После `docker compose down` Dify сеть пересоздаётся — переподключать все три (runbook §3).
 
 Провайдеры (ввести в Dify Console → Model Providers → OpenAI-API-compat):
 - **Embedding**: `http://embedder:8081/v1`, модель `bge-m3`, dim 1024, ключ — любая непустая строка.
 - **LLM**: `http://192.168.1.215:8080/v1`, модель `qwen-27b`, ключ — `~/ai-compose/secrets/llama_api_key`.
+- **Rerank** (2026-11-20): `http://reranker:8091`, модель `bge-reranker-v2-m3`,
+  ключ — `RAG/secrets/rerank_api_key` (Bearer). Сервис `rag-reranker` живёт в
+  RAG-репо (commit `98ee4d9`): FastAPI + CrossEncoder на CPU, формат
+  `query`/`documents`/`top_n` → `results[].relevance_score`.
+
+Тестовый датасет (test_file, лорный тест-документ): 309 сегментов, чанкинг
+`@@@CHUNK@@@`, крошка пути, max_tokens 1024, overlap 0. **Semantic search**
+(hybrid отключён — BM25 на EN-стоп-словах, корпус смешанный; ADR-013).
+**MCP-поиск по датасетам Dify** (2026-11-20, RAG `7f9a32e`): `rag-core` читает
+все классы `Vector_index_*` в weaviate через `POST /v1/search/{class}/near-vector`
+(форк Dify игнорирует GraphQL-тела и `?vector=` в REST) и объединяет с Qdrant;
+финальный топ — реранкером `bge-reranker-v2-m3`. MCP `search(query, k, source)`,
+`source=all|qdrant|dify`; имя документа в weaviate не хранится (только
+dataset_id/document_id/chunk_index) — определяется по тексту.
 
 Два векторных хранилища осознанно (ADR-013): Qdrant (агент/MCP) и Weaviate
 (человек/GUI) — изолированы стеками.
